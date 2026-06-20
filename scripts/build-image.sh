@@ -31,20 +31,20 @@ INCLUDE_PATHS="${INCLUDE_PATHS:-}"
 # OCI references must be lowercase (registry owner/repo can be mixed-case).
 IMAGE="$(printf '%s' "$IMAGE" | tr '[:upper:]' '[:lower:]')"
 
-if [ ! -d "$GAME_DIR" ] || [ -z "$(find "$GAME_DIR" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+if [[ ! -d "$GAME_DIR" ]] || [[ -z "$(find "$GAME_DIR" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
     echo "GAME_DIR '$GAME_DIR' is missing or empty - did the download run?" >&2
     exit 1
 fi
 
 VERSION_RAW="$(cat "$GAME_DIR/Version.txt" 2>/dev/null || true)"
 VERSION="$(printf '%s' "$VERSION_RAW" | awk '{print $1}' | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')"
-[ -n "$VERSION" ] || VERSION="${STEAM_BUILDID:-unknown}"
+[[ -n "$VERSION" ]] || VERSION="${STEAM_BUILDID:-unknown}"
 echo "steam-game-image: version='$VERSION' buildid='${STEAM_BUILDID:-none}'"
 
 LAYER="$(mktemp -d)/game.tar"
-if [ -n "$INCLUDE_PATHS" ]; then
+if [[ -n "$INCLUDE_PATHS" ]]; then
     for p in $INCLUDE_PATHS; do
-        [ -e "$GAME_DIR/$p" ] || { echo "include path not found in game dir: $p" >&2; exit 1; }
+        [[ -e "$GAME_DIR/$p" ]] || { echo "include path not found in game dir: $p" >&2; exit 1; }
     done
     # word-splitting INCLUDE_PATHS is intentional (multiple subpaths)
     # shellcheck disable=SC2086
@@ -64,7 +64,7 @@ printf '%s' "$REGISTRY_PASSWORD" | crane auth login "$REGISTRY" -u "$REGISTRY_US
 crane append --platform "$PLATFORM" -b "$BASE_IMAGE" -f "$LAYER" -t "$IMAGE:$VERSION"
 crane tag "$IMAGE:$VERSION" latest
 
-if [ -n "$STEAM_BUILDID" ]; then
+if [[ -n "$STEAM_BUILDID" ]]; then
     crane mutate "$IMAGE:$VERSION" --label "steam.buildid=$STEAM_BUILDID" -t "$IMAGE:$VERSION"
     crane mutate "$IMAGE:latest"   --label "steam.buildid=$STEAM_BUILDID" -t "$IMAGE:latest"
     echo "steam-game-image: stamped steam.buildid=$STEAM_BUILDID"
@@ -75,7 +75,7 @@ fi
 echo "pushed $IMAGE:$VERSION (+ latest)"
 
 # Outputs for GitHub Actions, if running in one.
-if [ -n "${GITHUB_OUTPUT:-}" ]; then
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     {
         echo "image-ref=$IMAGE:$VERSION"
         echo "version=$VERSION"

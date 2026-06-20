@@ -8,7 +8,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 FIX="$HERE/fixtures/app_info.txt"
 
 parse() {
-    awk -v branch="\"$1\"" '
+    local branch="$1"
+    awk -v branch="\"$branch\"" '
         /"branches"/ { inb = 1 }
         inb && index($0, branch) { inbr = 1 }
         inbr && /"buildid"/ { gsub(/[^0-9]/, "", $2); print $2; exit }
@@ -18,7 +19,7 @@ parse() {
 check() {
     local branch="$1" want="$2" got
     got="$(parse "$branch")"
-    if [ "$got" != "$want" ]; then
+    if [[ "$got" != "$want" ]]; then
         echo "FAIL: branch=$branch got '$got' want '$want'" >&2
         exit 1
     fi

@@ -98,6 +98,8 @@ runs:
   steps:
     - name: Install steamcmd, crane, jq
       shell: bash
+      env:
+        CRANE_VERSION: ${{ inputs.crane-version }}
       run: |
         set -euo pipefail
         sudo apt-get update -qq
@@ -107,7 +109,7 @@ runs:
           | tar zxf - -C "$HOME/.steamcmd"
         printf '#!/bin/sh\nexec "%s/steamcmd.sh" "$@"\n' "$HOME/.steamcmd" | sudo tee /usr/local/bin/steamcmd >/dev/null
         sudo chmod +x /usr/local/bin/steamcmd
-        curl -sSL "https://github.com/google/go-containerregistry/releases/download/v${{ inputs.crane-version }}/go-containerregistry_Linux_x86_64.tar.gz" \
+        curl -sSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
           | sudo tar -xzf - -C /usr/local/bin crane
 
     - name: Steam login
@@ -119,19 +121,25 @@ runs:
     - name: Resolve base image
       id: base
       shell: bash
+      env:
+        BASE_IMAGE: ${{ inputs.base-image }}
+        RUNNABLE: ${{ inputs.runnable }}
+        RUNTIME_BASE_IMAGE: ${{ inputs.runtime-base-image }}
+        MINIMAL_BASE_IMAGE: ${{ inputs.minimal-base-image }}
+        IMAGE: ${{ inputs.image }}
       run: |
         set -euo pipefail
-        if [ -n "${{ inputs.base-image }}" ]; then
-          base="${{ inputs.base-image }}"
-        elif [ "${{ inputs.runnable }}" = "true" ]; then
-          base="${{ inputs.runtime-base-image }}"
+        if [ -n "$BASE_IMAGE" ]; then
+          base="$BASE_IMAGE"
+        elif [ "$RUNNABLE" = "true" ]; then
+          base="$RUNTIME_BASE_IMAGE"
         else
-          base="${{ inputs.minimal-base-image }}"
+          base="$MINIMAL_BASE_IMAGE"
         fi
         echo "base=$base" >> "$GITHUB_OUTPUT"
         echo "resolved base image: $base"
         # OCI refs must be lowercase; github.repository_owner can be mixed-case.
-        image="$(printf '%s' "${{ inputs.image }}" | tr '[:upper:]' '[:lower:]')"
+        image="$(printf '%s' "$IMAGE" | tr '[:upper:]' '[:lower:]')"
         echo "image=$image" >> "$GITHUB_OUTPUT"
         echo "resolved image: $image"
 
@@ -146,13 +154,14 @@ runs:
         REGISTRY_USER: ${{ inputs.registry-username }}
         REGISTRY_PASSWORD: ${{ inputs.registry-password }}
         IMAGE: ${{ steps.base.outputs.image }}
+        SKIP_IF_UNCHANGED: ${{ inputs.skip-if-unchanged }}
       run: |
         set -euo pipefail
         published="$(STEAM_USERNAME="$STEAM_USERNAME" APP_ID="$APP_ID" BRANCH="$BRANCH" \
           bash "${{ github.action_path }}/scripts/published-buildid.sh" || true)"
         echo "published='$published'"
         echo "published=$published" >> "$GITHUB_OUTPUT"
-        if [ "${{ inputs.skip-if-unchanged }}" != "true" ]; then
+        if [ "$SKIP_IF_UNCHANGED" != "true" ]; then
           echo "skipped=false" >> "$GITHUB_OUTPUT"; exit 0
         fi
         printf '%s' "$REGISTRY_PASSWORD" | crane auth login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
@@ -183,18 +192,21 @@ runs:
       shell: bash
       env:
         STEAM_USERNAME: ${{ inputs.steam-username }}
+        APP_ID: ${{ inputs.app-id }}
+        BRANCH: ${{ inputs.branch }}
+        BRANCH_PASSWORD: ${{ inputs.branch-password }}
       run: |
         set -euo pipefail
         dir="${RUNNER_TEMP:-/tmp}/steam-game"
         mkdir -p "$dir"
-        beta=(); [ "${{ inputs.branch }}" != "public" ] && beta=(-beta "${{ inputs.branch }}")
-        [ -n "${{ inputs.branch-password }}" ] && beta+=(-betapassword "${{ inputs.branch-password }}")
+        beta=(); [ "$BRANCH" != "public" ] && beta=(-beta "$BRANCH")
+        [ -n "$BRANCH_PASSWORD" ] && beta+=(-betapassword "$BRANCH_PASSWORD")
         steamcmd \
           +@ShutdownOnFailedCommand 1 \
           +@NoPromptForPassword 1 \
           +force_install_dir "$dir" \
           +login "$STEAM_USERNAME" \
-          +app_update "${{ inputs.app-id }}" "${beta[@]}" validate \
+          +app_update "$APP_ID" "${beta[@]}" validate \
           +quit
         echo "GAME_DIR=$dir" >> "$GITHUB_ENV"
 
