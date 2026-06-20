@@ -12,14 +12,14 @@ keeping the resulting image private is on you.
 
 ## Why bother
 
-RimWorld mods compile fine against the public [`Krafs.Rimworld.Ref`](https://github.com/Krafs/Rimworld.Ref)
-NuGet with no game install at all. So why this? Two things that ref package can't do:
+Some games have a community reference package, so mods compile with no game install at
+all. So why this? Two things a stub package can't do:
 
-- Build against the real shipped assemblies (`/game/RimWorldLinux_Data/Managed/*.dll`),
-  not ref-only stubs.
+- Build against the real shipped assemblies, not ref-only stubs — so what compiles in CI
+  is exactly what loads in the game.
 - Actually run the game in CI. The default image carries `xvfb` plus the X11/GL/audio
-  native libs so the Linux build can launch (you bring the test-runner mod, see the
-  caveat below).
+  native libs so a Linux build can launch (you bring the test-runner mod, see the caveat
+  below).
 
 ## Quick start
 
@@ -85,22 +85,41 @@ Outputs: `image-ref`, `version`, `buildid`, `skipped`.
 
 ## Using the image
 
-To build against it with the real assemblies, point a mod project's container at the
-image:
+The image carries the real shipped assemblies, so a mod's CI can build against them: pull
+the image, copy the managed DLLs out onto the runner, and build. A minimal mod workflow:
 
-```dockerfile
-FROM ghcr.io/you/rimworld-game:latest
-# reference /game/RimWorldLinux_Data/Managed/*.dll in your .csproj HintPaths
+```yaml
+# .github/workflows/build.yml in your mod repo
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: { packages: read, contents: read }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage real game assemblies from the image
+        env:
+          GAME_IMAGE: ghcr.io/${{ github.repository_owner }}/rimworld-game:latest
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull -q "$GAME_IMAGE"
+          cid="$(docker create "$GAME_IMAGE")"
+          sudo mkdir -p /mnt/games/RimWorld
+          sudo chown "$(id -u):$(id -g)" /mnt/games/RimWorld
+          docker cp "$cid:/game/RimWorldLinux_Data" /mnt/games/RimWorld/RimWorldLinux_Data
+          docker rm -f "$cid" >/dev/null
+          test -f /mnt/games/RimWorld/RimWorldLinux_Data/Managed/Assembly-CSharp.dll
+
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 9.0.x }
+
+      # Point your .csproj at the staged DLLs (a Reference/HintPath guarded by Exists()),
+      # then build.
+      - run: dotnet build YourMod.sln -c Release
 ```
 
-For a complete CI workflow that pulls the image, stages the DLLs, and `dotnet build`s a
-mod, see [`examples/build-mod-against-game.yml`](examples/build-mod-against-game.yml).
-
-> **Publicization gotcha.** `Krafs.Rimworld.Ref` ships *publicized* assemblies (all
-> members public); the real shipped DLLs are not. Source that uses `public override` on
-> a protected member, or accesses non-public members, compiles against Krafs but **fails
-> against the real DLLs** (CS0507 / CS0122). Match the real access level, or add a
-> publicizer (e.g. `Krafs.Publicizer`).
+The full runnable copy is in [`examples/build-mod-against-game.yml`](examples/build-mod-against-game.yml).
 
 To launch it, the runnable base ships a `run-headless` helper (`xvfb-run -a "$@"`):
 
