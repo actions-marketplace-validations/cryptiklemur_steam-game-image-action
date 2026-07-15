@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Layer an installed Steam game onto a base image and push it to a registry,
-# tagged by version + latest and stamped with the steam.buildid OCI label.
+# tagged by version + latest (+ a branch-scoped latest when BRANCH_TAG is set)
+# and stamped with the steam.buildid OCI label.
 #
 # Uses crane, so no Docker daemon is needed (GitHub-hosted runners have one, but
 # crane is faster and works the same on any runner).
@@ -13,6 +14,7 @@
 #   REGISTRY_USER     registry username (required)
 #   REGISTRY_PASSWORD registry token/password, read from stdin via env (required)
 #   STEAM_BUILDID     buildid to stamp as the steam.buildid label (optional)
+#   BRANCH_TAG        branch-scoped latest tag to also apply, e.g. latest-public (optional)
 #   GAME_PATH         path the game lands at inside the image (default /game)
 #   PLATFORM          image platform (default linux/amd64)
 set -euo pipefail
@@ -24,6 +26,7 @@ set -euo pipefail
 : "${REGISTRY_USER:?set REGISTRY_USER}"
 : "${REGISTRY_PASSWORD:?set REGISTRY_PASSWORD}"
 STEAM_BUILDID="${STEAM_BUILDID:-}"
+BRANCH_TAG="${BRANCH_TAG:-}"
 GAME_PATH="${GAME_PATH:-/game}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 INCLUDE_PATHS="${INCLUDE_PATHS:-}"
@@ -62,17 +65,23 @@ fi
 printf '%s' "$REGISTRY_PASSWORD" | crane auth login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
 
 crane append --platform "$PLATFORM" -b "$BASE_IMAGE" -f "$LAYER" -t "$IMAGE:$VERSION"
-crane tag "$IMAGE:$VERSION" latest
 
 if [[ -n "$STEAM_BUILDID" ]]; then
     crane mutate "$IMAGE:$VERSION" --label "steam.buildid=$STEAM_BUILDID" -t "$IMAGE:$VERSION"
-    crane mutate "$IMAGE:latest"   --label "steam.buildid=$STEAM_BUILDID" -t "$IMAGE:latest"
     echo "steam-game-image: stamped steam.buildid=$STEAM_BUILDID"
 else
     echo "steam-game-image: STEAM_BUILDID unset; skipping label stamp" >&2
 fi
 
-echo "pushed $IMAGE:$VERSION (+ latest)"
+# Tag after the label mutate so every tag points at the labeled manifest.
+crane tag "$IMAGE:$VERSION" latest
+EXTRA_TAGS="latest"
+if [[ -n "$BRANCH_TAG" ]]; then
+    crane tag "$IMAGE:$VERSION" "$BRANCH_TAG"
+    EXTRA_TAGS="latest, $BRANCH_TAG"
+fi
+
+echo "pushed $IMAGE:$VERSION (+ $EXTRA_TAGS)"
 
 # Outputs for GitHub Actions, if running in one.
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then

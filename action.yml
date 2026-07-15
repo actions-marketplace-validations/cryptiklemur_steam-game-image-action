@@ -81,8 +81,8 @@ inputs:
 
 outputs:
   image-ref:
-    description: "The pushed image ref (image:version), empty if skipped."
-    value: ${{ steps.build.outputs.image-ref }}
+    description: "Image ref to consume: image:version when built, image:latest-<branch> when the build was skipped."
+    value: ${{ steps.build.outputs.image-ref || steps.gate.outputs.image-ref }}
   version:
     description: "The version tag used."
     value: ${{ steps.build.outputs.version }}
@@ -130,6 +130,7 @@ runs:
         RUNTIME_BASE_IMAGE: ${{ inputs.runtime-base-image }}
         MINIMAL_BASE_IMAGE: ${{ inputs.minimal-base-image }}
         IMAGE: ${{ inputs.image }}
+        BRANCH: ${{ inputs.branch }}
       run: |
         set -euo pipefail
         if [ -n "$BASE_IMAGE" ]; then
@@ -145,6 +146,11 @@ runs:
         image="$(printf '%s' "$IMAGE" | tr '[:upper:]' '[:lower:]')"
         echo "image=$image" >> "$GITHUB_OUTPUT"
         echo "resolved image: $image"
+        # A branch-scoped latest tag keeps multi-branch matrices (public + a
+        # beta branch on one image ref) from fighting over a single :latest.
+        branch_tag="latest-$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9._-' '-')"
+        echo "branch-tag=$branch_tag" >> "$GITHUB_OUTPUT"
+        echo "resolved branch tag: $branch_tag"
 
     - name: Build-id gate
       id: gate
@@ -157,6 +163,7 @@ runs:
         REGISTRY_USER: ${{ inputs.registry-username }}
         REGISTRY_PASSWORD: ${{ inputs.registry-password }}
         IMAGE: ${{ steps.base.outputs.image }}
+        BRANCH_TAG: ${{ steps.base.outputs.branch-tag }}
         SKIP_IF_UNCHANGED: ${{ inputs.skip-if-unchanged }}
       run: |
         set -euo pipefail
@@ -168,11 +175,12 @@ runs:
           echo "skipped=false" >> "$GITHUB_OUTPUT"; exit 0
         fi
         printf '%s' "$REGISTRY_PASSWORD" | crane auth login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
-        built="$(crane config "$IMAGE:latest" 2>/dev/null | jq -r '.config.Labels["steam.buildid"] // ""' || true)"
+        built="$(crane config "$IMAGE:$BRANCH_TAG" 2>/dev/null | jq -r '.config.Labels["steam.buildid"] // ""' || true)"
         echo "built='$built'"
         if [ -n "$published" ] && [ "$published" = "$built" ]; then
           echo "up to date; skipping build"
           echo "skipped=true" >> "$GITHUB_OUTPUT"
+          echo "image-ref=$IMAGE:$BRANCH_TAG" >> "$GITHUB_OUTPUT"
         else
           echo "skipped=false" >> "$GITHUB_OUTPUT"
         fi
@@ -224,6 +232,7 @@ runs:
         REGISTRY_USER: ${{ inputs.registry-username }}
         REGISTRY_PASSWORD: ${{ inputs.registry-password }}
         STEAM_BUILDID: ${{ steps.gate.outputs.published }}
+        BRANCH_TAG: ${{ steps.base.outputs.branch-tag }}
         GAME_PATH: ${{ inputs.game-path }}
         PLATFORM: ${{ inputs.platform }}
         INCLUDE_PATHS: ${{ inputs.include-paths }}

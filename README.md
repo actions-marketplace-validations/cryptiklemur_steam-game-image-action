@@ -53,8 +53,10 @@ jobs:
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-That pushes `ghcr.io/you/rimworld-game:<version>` and `:latest` (both private),
-labeled with `steam.buildid`.
+That pushes `ghcr.io/you/rimworld-game:<version>`, `:latest`, and a branch-scoped
+`:latest-<branch>` (e.g. `latest-public`), all private and labeled with `steam.buildid`.
+The branch tag is what the build-id gate compares against, so a matrix that builds
+`public` and a beta branch against one image ref caches each branch independently.
 
 To keep it fresh, copy [`examples/watch-and-build.yml`](examples/watch-and-build.yml).
 A scheduled run acts as the watcher: the build-id gate compares the published buildid
@@ -74,7 +76,7 @@ cron runs stay cheap and only a genuinely new build kicks off a rebuild.
 | `registry` / `registry-username` / `registry-password` | `ghcr.io` / actor / N/A | push auth (GHCR + `GITHUB_TOKEN` works) |
 | `runnable` | `true` | `true` appends onto the xvfb/native-deps base; `false` gives a minimal build/reference base |
 | `include-paths` | `""` (whole game) | space/newline-separated subpaths to include, e.g. `RimWorldLinux_Data/Managed` for a DLLs-only image |
-| `skip-if-unchanged` | `true` | gate on the `steam.buildid` label |
+| `skip-if-unchanged` | `true` | gate on the `steam.buildid` label of `:latest-<branch>` |
 
 How people usually run it:
 
@@ -85,7 +87,8 @@ How people usually run it:
   the real DLLs without dragging the whole game along. (`include-paths` is relative to the game
   install, and the `*_Data/Managed` layout is a Unity thing.)
 
-Outputs: `image-ref`, `version`, `buildid`, `skipped`.
+Outputs: `image-ref` (the `image:version` ref when built, the `image:latest-<branch>` ref
+when the gate skipped, so it is always pullable), `version`, `buildid`, `skipped`.
 
 ## Using the image
 
@@ -147,8 +150,9 @@ only state the build-id gate needs.
 Caching keeps it cheap, in two places:
 
 - Build-id gate (`skip-if-unchanged`): when the published buildid already matches the
-  image's `steam.buildid` label, the action downloads nothing and pushes nothing. No
-  new version, no rebuild.
+  `steam.buildid` label on the branch's `latest-<branch>` tag, the action downloads
+  nothing and pushes nothing. No new version, no rebuild. Each Steam branch gates on
+  its own tag, so multiple branches sharing one image ref never invalidate each other.
 - Install cache (`actions/cache`): on an actual rebuild, the prior game install gets
   restored and `app_update` fetches only the changed files (a delta) instead of the
   whole game. Keyed by app id and branch.
